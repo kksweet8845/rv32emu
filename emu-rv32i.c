@@ -87,10 +87,10 @@ original copyright:
 #include <gelf.h>
 
 /* uncomment this for an instruction trace and other debug outputs */
-#if 0
+#if 1
 #define DEBUG_OUTPUT
 #endif
-#if 0
+#if 1
 #define DEBUG_EXTRA
 #endif
 
@@ -779,6 +779,8 @@ uint32_t get_insn32(uint32_t pc)
     uint32_t ptr = pc - ram_start;
     if (ptr > RAM_SIZE) return 1;
     uint8_t* p = ram + ptr;
+    if((p[0] & 0x03) < 3)
+        return p[0] | (p[1] << 8);
     return p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24);
 }
 
@@ -1904,7 +1906,13 @@ void execute_instruction()
         break;
 
 #endif
+#ifndef RV32C
 
+    case 1: /* Compressed insn */
+
+        break;
+
+#endif
     default:
         raise_exception(CAUSE_ILLEGAL_INSTRUCTION, insn);
         return;
@@ -1944,6 +1952,9 @@ void riscv_cpu_interp_x32()
         } else {
             /* normal instruction execution */
             insn = get_insn32(pc);
+#ifdef DEBUG_EXTRA
+            printf("insn : %#x\n", insn);
+#endif
             insn_counter++;
 
 #ifdef DEBUG_OUTPUT
@@ -2023,7 +2034,7 @@ int main(int argc, char** argv)
                 GElf_Sym sym;
                 gelf_getsym(data, i, &sym);
                 char* name = elf_strptr(elf, shdr.sh_link, sym.st_name);
-#if 0
+#ifdef DEBUG_EXTRA
                 if(*name) printf("sym '%s' %lx\n",name,sym.st_value);
 #endif
                 if (strcmp(name, "begin_signature") == 0) {
@@ -2056,6 +2067,7 @@ int main(int argc, char** argv)
 
     /* scan for program */
     while ((scn = elf_nextscn(elf, scn)) != NULL) {
+        /* ELF Section Header Table*/
         gelf_getshdr(scn, &shdr);
         if (shdr.sh_type == SHT_PROGBITS) {
             Elf_Data *data = elf_getdata(scn, NULL);
@@ -2145,7 +2157,7 @@ int main(int argc, char** argv)
     /* run program in emulator */
     pc = ram_start;
     /* Initialize the address of stack pointer*/
-    reg[2] = ram_start + RAM_SIZE - 4;
+    reg[2] = ram_start + RAM_SIZE;
     riscv_cpu_interp_x32();
 
     uint64_t ns2 = get_clock();
