@@ -213,6 +213,7 @@ uint32_t end_signature = 0;
 
 /* is set to false to exit the emulator */
 int machine_running = TRUE;
+unsigned char state = 0;
 
 /* privilege levels */
 #define PRV_U 0
@@ -805,6 +806,7 @@ unsigned char get_insn32(uint32_t pc, uint32_t *insn)
     if (ptr > RAM_SIZE) return 1;
     uint8_t* p = ram + ptr;
 #ifdef DEBUG_OUTPUT
+    printf("Here core dump\n");
     printf("address %08x\n", p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24));
 #endif
 #ifdef RV32C
@@ -1702,7 +1704,8 @@ void execute_instruction()
                 */
                /* I modified the ecall convention which disabled the program end*/
                 if (begin_signature) {
-                    if (0){//reg[3] & 1) {
+                    state++;
+                    if ((reg[3] & 1) && state == 2) {
 #ifdef DEBUG_OUTPUT
                         printf("program end, result: %04x\n", reg[3] >> 1);
 #endif
@@ -1955,6 +1958,39 @@ void execute_instruction()
 #ifdef RV32C
     /* Compressed insn */
     case 0:
+        funct3 = (insn >> 13) & 0x7;
+        midpart = (insn >> 2) & 0x07ff;
+        switch(funct3){
+        case 0:
+            switch(midpart){
+            case 0:
+#ifdef DEBUG_EXTRA
+                dprintf(">>> Illegal instruction\n");
+#endif
+                break;
+            default:
+#ifdef DEBUG_EXTRA
+                dprintf(">>> C.ADDI4SPN\n");
+#endif
+                break;
+            }
+        case 6:
+#ifdef DEBUG_EXTRA
+                dprintf(">>> C.SW\n");
+#endif
+            rs1 = ((midpart >> 5) & 0x1f);
+            rs2 = midpart & 0x7;
+            imm = ((midpart >> 1) & 0x8) |
+                  ((midpart >> 4) & 0x70) |
+                  ((midpart << 7) & 0x400);
+            imm = (imm >> 1) & 0x7f;
+            addr = reg[rs1] + imm;
+            val = reg[rs2];
+            if (target_write_u32(addr, val)) {
+                raise_exception(pending_exception, pending_tval);
+                return;
+            }
+        }
         break;
     case 1:
         funct3 = (insn >> 13) & 0x7;
@@ -1970,10 +2006,11 @@ void execute_instruction()
 #ifdef DEBUG_EXTRA
                 dprintf(">>> C.ADDI\n");
 #endif
-                rs1 = rd = ((midpart >> 5) & 0x1f) + 8;
+                rs1 = rd = ((midpart >> 5) & 0x1f);
                 imm = (midpart & 0x1f) | ((midpart >> 5) &  0x20);
                 val = reg[rs1] + imm;
             }
+            printf("rd: %d, rs1: %d, imm: %d, reg[rd]: %d, val: %d\n", rd, rs1, imm, reg[rd], val);
             break;
         case 1: /* C.JAL, C.ADDIW */
 #ifdef DEBUG_EXTRA
@@ -1992,18 +2029,20 @@ void execute_instruction()
 #endif
             switch(XLEN) {
             case 32:
+                rd = 0;
                 imm = (midpart & 0x400) |
                       ((midpart << 3) & 0x200) |
-                      (midpart & 0x170) |
+                      (midpart & 0x180) |
                       ((midpart << 2) & 0x40) |
                       (midpart & 0x20) |
                       ((midpart << 4) & 0x10) |
                       ((midpart >> 6) & 0x8) |
                       ((midpart >> 1) & 0x7);
-                imm = imm & 0xfffe;
-                if (rd != 0)
-                    reg[1] = pc + 2; /* Store the link to x1 register */
+                imm = (imm << 1) & 0xfffe;
+                printf("%08x\n", imm);
+                reg[1] = pc + 2; /* Store the link to x1 register */
                 next_pc = (int32_t)(pc + imm);
+                printf("next_pc: %08x\n", next_pc);
                 if(next_pc > pc) forward_counter++;
                 else backward_counter++;
                 jump_counter++;
@@ -2023,10 +2062,12 @@ void execute_instruction()
 #endif
             rs1 = rd = ((midpart >> 5) & 0x1f);
             imm = ((midpart >> 5) & 0x20) | (midpart & 0x1f);
+            imm = imm << 26 >> 26;
             val = imm;
-            printf("%08x, rd: %d\n", val, rd);
+            printf("%08x, rd: %d, imm : %08x\n", val, rd, imm);
             break;
         case 3: /* C.ADDI16SP, C.LUI */
+            rs1 = rd = ((midpart >> 5) & 0x1f);
 #ifdef DEBUG_EXTRA
             switch(rd){
             case 2:
@@ -2036,23 +2077,34 @@ void execute_instruction()
                 dprintf(">>> C.LUI\n");
             }
 #endif
-            rs1 = rd = ((midpart >> 5) & 0x1f);
             switch(rd){
             case 2:
                 imm = ((midpart >> 4) & 0x1) |
                       ((midpart << 1) & 0x2) |
-                      ((midpart)      & 0x8) |
-                      ((midpart << 2) & 0xc) |
-                      ((midpart >> 5) & 0x10);
-                imm = imm << 4;
+                      ((midpart >> 1) & 0x4) |
+                      ((midpart << 2) & 0x18) |
+                      ((midpart >> 5) & 0x20);
+                imm = (imm << 4 )<< (31 - 9) >> (31 - 9);
+                printf("imm :%d\n", imm);
                 val = reg[rd] + imm;
                 break;
             default:
                 imm = (midpart & 0x1f) | ((midpart >> 5) & 0x20);
-                imm = ((imm << 12) & 0xfffff000);
-                imm = imm << 14 >> 14;
-                if(rd != 0)
-                    val = reg[rd] | imm;
+                imm = (imm << 12);
+                if(imm == 0){
+                    raise_exception(CAUSE_ILLEGAL_INSTRUCTION, insn);
+                    return;
+                }
+                if(rd != 0 && rd != 2){
+                    val = (reg[rd] & ~0x0003f000) | imm;
+                    val = val & 0xfffff000;
+                    val = (int32_t) val << (31 - 17) >> (31 - 17);
+
+                }
+                else{
+                    raise_exception(CAUSE_ILLEGAL_INSTRUCTION, insn);
+                    return;
+                }
                 break;
             }
             break;
@@ -2072,13 +2124,21 @@ void execute_instruction()
 #endif
                 switch(XLEN){
                 case 32:
+                    if((midpart >> 10 & 0x1)){
+                        raise_exception(CAUSE_ILLEGAL_INSTRUCTION, insn);
+                        return;
+                    }
                 case 64:
-                    rs1 = rd = ((midpart >> 5) & 0x1f) + 8;
-                    imm = (midpart & 0xf) | (midpart >> 5 & 0x10);
+                    rs1 = rd = ((midpart >> 5) & 0x7) + 8;
+                    imm = (midpart & 0x1f) | (midpart >> 5 & 0x20);
+                    if(imm == 0){
+                        raise_exception(CAUSE_ILLEGAL_INSTRUCTION, insn);
+                        return;
+                    }
                     val = reg[rs1];
                     break;
                 case 128:
-                    rs1 = rd = ((midpart >> 5) & 0x1f) + 8;
+                    rs1 = rd = ((midpart >> 5) & 0x7) + 8;
                     imm = 64;
                     val = reg[rs1];
                     break;
@@ -2091,30 +2151,44 @@ void execute_instruction()
                 case 32:
                 case 64:
                     dprintf(">>> C.SRAI\n");
+                    break;
                 case 128:
                     dprintf(">>> C.SRAI64\n");
+                    break;
                 }
 #endif
                 switch(XLEN){
-                case 32: case 64:
-                    rs1 = rd = ((midpart >> 5) & 0x1f) + 8;
-                    imm = (midpart & 0xf) | ((midpart >> 5) & 0x10);
+                case 32:
+                    if((midpart >> 10 & 0x1)){
+                        raise_exception(CAUSE_ILLEGAL_INSTRUCTION, insn);
+                        return;
+                    }
+                case 64:
+                    rs1 = rd = ((midpart >> 5) & 0x7) + 8;
+                    imm = (midpart & 0x1f) | (midpart >> 5 & 0x20);
+                    if(imm == 0){
+                        raise_exception(CAUSE_ILLEGAL_INSTRUCTION, insn);
+                        return;
+                    }
                     val = reg[rs1];
+                    printf("imm : %08x\n", imm);
+                    printf("val : %08x\n", val);
                     break;
                 case 128:
-                    rs1 = rd = ((midpart >> 5) & 0x1f) + 8;
+                    rs1 = rd = ((midpart >> 5) & 0x7) + 8;
                     imm = 64;
                     val = reg[rs1];
                     break;
                 }
-                val = val << imm;
+                val = (int32_t) val >> imm;
                 break;
             case 2: /* C.ANDI */
 #ifdef DEBUG_EXTRA
                 dprintf(">>> C.ANDI\n");
 #endif
                 rs1 = rd = ((midpart >> 5) & 0x7) + 8;
-                imm = (midpart & 0x1f) | ((midpart >> 5) & 0x10);
+                imm = (midpart & 0x1f) | ((midpart >> 5) & 0x20);
+                imm = imm << (31 - 5) >> (31 - 5);
                 val = reg[rs1];
                 val = val & imm;
                 break;
@@ -2139,6 +2213,7 @@ void execute_instruction()
                     dprintf(">>> C.OR\n");
 #endif
                     val = reg[rd] | reg[rs2];
+                    printf("reg[rd]: %08x, reg[rs2]: %08x\n", reg[rd], reg[rs2]);
                     break;
                 case 3: /* C.AND */
 #ifdef DEBUG_EXTRA
@@ -2186,7 +2261,7 @@ void execute_instruction()
             rd = 0;
             imm = ((midpart >> 1) & 0x7)  |
                   ((midpart >> 6) & 0x8)  |
-                  ((midpart << 5) & 0x10) |
+                  ((midpart << 4) & 0x10) |
                   ((midpart)      & 0x20) |
                   ((midpart << 2) & 0x40) |
                   ((midpart)      & 0x180)|
@@ -2206,11 +2281,11 @@ void execute_instruction()
             rd = 0;
             if(reg[rs1] == 0){
                 imm = ((midpart >> 1) & 0x3)  |
-                      ((midpart >> 3) & 0xc)  |
+                      ((midpart >> 6) & 0xc)  |
                       ((midpart << 4) & 0x10) |
                       ((midpart << 2) & 0x60) |
-                      ((midpart)      & 0x80);
-                imm = (imm << 1) << 23 >> 23;
+                      ((midpart >> 3) & 0x80);
+                imm = (imm << 1) << (31 - 8) >> (31 - 8);
                 next_pc = (int32_t)(pc + imm);
                 if(next_pc > pc) forward_counter++;
                 else backward_counter++;
@@ -2223,14 +2298,13 @@ void execute_instruction()
 #endif
             rs1  = ((midpart >> 5) & 0x7) + 8;
             rd = 0;
-            imm = 0;
             if(reg[rs1] != 0){
                 imm = ((midpart >> 1) & 0x3)  |
                       ((midpart >> 6) & 0xc)  |
                       ((midpart << 4) & 0x10) |
                       ((midpart << 2) & 0x60) |
-                      ((midpart)      & 0x80);
-                imm = (imm << 1) << 23 >> 23;
+                      ((midpart >> 3) & 0x80);
+                imm = (imm << 1) << (31 - 8) >> (31 - 8);
                 next_pc = (int32_t)(pc + imm);
                 if(next_pc > pc) forward_counter++;
                 else backward_counter++;
@@ -2249,6 +2323,26 @@ void execute_instruction()
         }
         break;
     case 2:
+        funct3 = (insn >> 13) & 0x7;
+        midpart = (insn >> 2) & 0x07ff;
+        switch(funct3){
+        case 6:
+#ifdef DEBUG_EXTRA
+            dprintf(">>> C.SWSP\n");
+#endif
+            rs2 = midpart & 0x1f;
+            imm = ((midpart >> 2) & 0x1e0) |
+                  ((midpart << 4) & 0x600);
+            imm = (imm >> 3) & 0xff;
+            addr = reg[2] + imm;
+            val = reg[rs2];
+            printf("rs2: %d, imm: %d, reg[rs2]: %d, val: %d\n", rs2, imm, reg[rs2], val);
+            if (target_write_u32(addr, val)) {
+                raise_exception(pending_exception, pending_tval);
+                return;
+            }
+            break;
+        }
         break;
 
 #endif
@@ -2509,11 +2603,13 @@ int main(int argc, char** argv)
     if (signature_file) {
         FILE* sf = fopen(signature_file, "w");
         int size = end_signature - begin_signature;
-        for (int i = 0; i < size / 16; i++) {
-            for (int j = 0; j < 16; j++) {
-                fprintf(sf, "%02x", ram[begin_signature + 15 - j - ram_start]);
+        printf("size : %d\n", size);
+        for (int i = 0; i < size / 4; i++) {
+            // fprintf(sf, "%02x ", begin_signature  - ram_start);
+            for (int j = 0; j < 4; j++) {
+                fprintf(sf, "%02x", ram[begin_signature + 3 - j - ram_start]);
             }
-            begin_signature += 16;
+            begin_signature += 4;
             fprintf(sf, "\n");
         }
         fclose(sf);

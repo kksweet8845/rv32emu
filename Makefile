@@ -20,7 +20,7 @@ test1: test1.c
 
 
 %.log: $(WORK_DIR)/%.elf
-	$(RUN_TARGET) $<
+	$(RUN_TARGET) $< +signature=sig.txt
 
 check: $(BINS)
 	./emu-rv32i test1

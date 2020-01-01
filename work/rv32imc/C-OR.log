@@ -1,4 +1,4 @@
-Info Session started: Sun Dec 29 15:49:58 2019
+Info Session started: Thu Jan  2 06:39:11 2020
 
 Info ------------- ENVIRONMENT -------------
 Info --------------------------------------
@@ -22,7 +22,7 @@ Copyright (c) 2005-2019 Imperas Software Ltd.  Contains Imperas Proprietary Info
 Licensed Software, All Rights Reserved.
 Visit www.IMPERAS.com for multicore debug, verification and analysis solutions.
 
-CpuManagerFixedPlatform started: Sun Dec 29 15:49:58 2019
+CpuManagerFixedPlatform started: Thu Jan  2 06:39:11 2020
 
 
 Info (OR_OF) Target 'riscvOVPsim/cpu' has object file read from '/home/nober/git/adv_CO/riscv-compliance/work/rv32imc//C-OR.elf'
@@ -58,16 +58,16 @@ Info
 Info ---------------------------------------------------
 Info SIMULATION TIME STATISTICS
 Info   Simulated time        : 0.00 seconds
-Info   User time             : 0.00 seconds
+Info   User time             : 0.01 seconds
 Info   System time           : 0.00 seconds
 Info   Elapsed time          : 0.00 seconds
 Info ---------------------------------------------------
 
-CpuManagerFixedPlatform finished: Sun Dec 29 15:49:58 2019
+CpuManagerFixedPlatform finished: Thu Jan  2 06:39:11 2020
 
 
 CpuManagerFixedPlatform (64-Bit) v20190923.0 Open Virtual Platform simulator from www.IMPERAS.com.
 Visit www.IMPERAS.com for multicore debug, verification and analysis solutions.
 
-Info Session ended: Sun Dec 29 15:49:58 2019
+Info Session ended: Thu Jan  2 06:39:11 2020
 
