@@ -8,6 +8,7 @@ LDFLAGS = -lelf
 
 RUN_TARGET := ./emu-rv32i
 WORK_DIR = work/rv32imc
+DIFF = $(diff a b)
 
 
 all: $(BINS)
@@ -20,7 +21,7 @@ test1: test1.c
 
 
 %.log: $(WORK_DIR)/%.elf
-	$(RUN_TARGET) $< +signature=sig.txt
+	$(RUN_TARGET) --elf $< --signature$(patsubst %.elf, %.signature.output, $<) --output sig.txt
 
 check: $(BINS)
 	./emu-rv32i test1
